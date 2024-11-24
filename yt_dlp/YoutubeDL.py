@@ -807,25 +807,32 @@ class YoutubeDL:
                 get_postprocessor(pp_def.pop('key'))(self, **pp_def),
                 when=when)
 
-        def preload_download_archive(fn):
-            """Preload the archive, if any is specified"""
-            archive = set()
-            if fn is None:
-                return archive
-            elif not is_path_like(fn):
-                return fn
+        self.archive = {}
 
-            self.write_debug(f'Loading archive file {fn!r}')
-            try:
-                with locked_file(fn, 'r', encoding='utf-8') as archive_file:
-                    for line in archive_file:
-                        archive.add(line.strip())
-            except OSError as ioe:
-                if ioe.errno != errno.ENOENT:
-                    raise
-            return archive
+    def preload_download_archive(self, ie):
+        """Preload the archive, if any is specified"""
+        fn = self.prepare_filename(ie, outtmpl=self.params.get('download_archive'))
 
-        self.archive = preload_download_archive(self.params.get('download_archive'))
+        if fn is None:
+            return
+        elif not is_path_like(fn):
+            return
+        
+        # Preventing archive file from getting loaded multiple times
+        if fn in self.archive:
+            self.write_debug(f"Archive dictionary already loaded file: {fn}")
+            return
+
+        archive = set()
+        self.write_debug(f'Loading archive file {fn!r}')
+        try:
+            with locked_file(fn, 'r', encoding='utf-8') as archive_file:
+                for line in archive_file:
+                    archive.add(line.strip())
+        except OSError as ioe:
+            if ioe.errno != errno.ENOENT:
+                raise
+        self.archive[fn] = archive
 
     def warn_if_short_id(self, argv):
         # short YouTube ID starting with dash?
@@ -1540,6 +1547,8 @@ class YoutubeDL:
                         return f'Skipping {video_title}'
             return ret
 
+        self.preload_download_archive(info_dict)
+
         if self.in_download_archive(info_dict):
             reason = ''.join((
                 format_field(info_dict, 'id', f'{self._format_screen("%s", self.Styles.ID)}: '),
@@ -1604,6 +1613,8 @@ class YoutubeDL:
                                     'and will probably not work.')
 
             temp_id = ie.get_temp_id(url)
+            self.preload_download_archive({'id': temp_id, 'ie_key': key})
+
             if temp_id is not None and self.in_download_archive({'id': temp_id, 'ie_key': key}):
                 self.to_screen(f'[download] {self._format_screen(temp_id, self.Styles.ID)}: '
                                'has already been recorded in the archive')
@@ -1810,6 +1821,8 @@ class YoutubeDL:
         if extra_info is None:
             extra_info = {}
         result_type = ie_result.get('_type', 'video')
+
+        self.preload_download_archive(ie_result)
 
         if result_type in ('url', 'url_transparent'):
             ie_result['url'] = sanitize_url(
@@ -2719,6 +2732,8 @@ class YoutubeDL:
     def process_video_result(self, info_dict, download=True):
         assert info_dict.get('_type', 'video') == 'video'
         self._num_videos += 1
+
+        self.preload_download_archive(info_dict)
 
         if 'id' not in info_dict:
             raise ExtractorError('Missing "id" field in extractor result', ie=info_dict['extractor'])
@@ -3767,14 +3782,21 @@ class YoutubeDL:
         if not self.archive:
             return False
 
+        fn = self.prepare_filename(info_dict, outtmpl=self.params.get('download_archive'))
+        if fn not in self.archive:
+            return False
+
         vid_ids = [self._make_archive_id(info_dict)]
         vid_ids.extend(info_dict.get('_old_archive_ids') or [])
-        return any(id_ in self.archive for id_ in vid_ids)
+        return any(id_ in self.archive[fn] for id_ in vid_ids)
 
     def record_download_archive(self, info_dict):
-        fn = self.params.get('download_archive')
+        fn = self.prepare_filename(info_dict, outtmpl=self.params.get('download_archive'))
         if fn is None:
             return
+        if fn not in self.archive: 
+            return
+        
         vid_id = self._make_archive_id(info_dict)
         assert vid_id
 
@@ -3782,7 +3804,9 @@ class YoutubeDL:
         if is_path_like(fn):
             with locked_file(fn, 'a', encoding='utf-8') as archive_file:
                 archive_file.write(vid_id + '\n')
-        self.archive.add(vid_id)
+                fn = self.prepare_filename(info_dict, outtmpl=self.params.get('download_archive'))
+
+        self.archive[fn].add(vid_id)
 
     @staticmethod
     def format_resolution(format, default='unknown'):
