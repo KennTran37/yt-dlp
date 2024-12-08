@@ -811,7 +811,11 @@ class YoutubeDL:
 
     def preload_download_archive(self, ie):
         """Preload the archive, if any is specified"""
-        fn = self.prepare_filename(ie, outtmpl=self.params.get('download_archive'))
+        archive_path = self.params.get('download_archive')
+        if not archive_path:
+            return
+
+        fn = self.prepare_filename(ie, outtmpl=archive_path)
 
         if fn is None:
             return
@@ -1821,8 +1825,6 @@ class YoutubeDL:
         if extra_info is None:
             extra_info = {}
         result_type = ie_result.get('_type', 'video')
-
-        self.preload_download_archive(ie_result)
 
         if result_type in ('url', 'url_transparent'):
             ie_result['url'] = sanitize_url(
@@ -3782,8 +3784,13 @@ class YoutubeDL:
         if not self.archive:
             return False
 
-        fn = self.prepare_filename(info_dict, outtmpl=self.params.get('download_archive'))
+        archive_path = self.params.get('download_archive')
+        if not archive_path:
+            return 
+
+        fn = self.prepare_filename(info_dict, outtmpl=archive_path)
         if fn not in self.archive:
+            self.write_debug("File does not exist in archive dictionary?")
             return False
 
         vid_ids = [self._make_archive_id(info_dict)]
@@ -3791,7 +3798,11 @@ class YoutubeDL:
         return any(id_ in self.archive[fn] for id_ in vid_ids)
 
     def record_download_archive(self, info_dict):
-        fn = self.prepare_filename(info_dict, outtmpl=self.params.get('download_archive'))
+        archive_path = self.params.get('download_archive')
+        if not archive_path:
+            return 
+
+        fn = self.prepare_filename(info_dict, outtmpl=archive_path)
         if fn is None:
             return
         if fn not in self.archive: 
@@ -3804,7 +3815,7 @@ class YoutubeDL:
         if is_path_like(fn):
             with locked_file(fn, 'a', encoding='utf-8') as archive_file:
                 archive_file.write(vid_id + '\n')
-                fn = self.prepare_filename(info_dict, outtmpl=self.params.get('download_archive'))
+                fn = self.prepare_filename(info_dict, outtmpl=archive_path)
 
         self.archive[fn].add(vid_id)
 
